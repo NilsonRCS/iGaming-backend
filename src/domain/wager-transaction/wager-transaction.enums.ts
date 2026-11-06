@@ -1,0 +1,16 @@
+export enum WagerKind {
+  OPENING = 'OPENING',
+  BET = 'BET',
+  WIN = 'WIN',
+  LOSS = 'LOSS',
+  REFUND = 'REFUND',
+  ROLLBACK = 'ROLLBACK',
+}
+
+export enum WagerStatus {
+  PENDING = 'PENDING',
+  PENDING_REFERENCE = 'PENDING_REFERENCE',
+  PROCESSED = 'PROCESSED',
+  REJECTED = 'REJECTED',
+  FAILED = 'FAILED',
+}
