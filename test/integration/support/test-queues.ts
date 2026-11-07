@@ -1,5 +1,6 @@
 import {
   CreateQueueCommand,
+  DeleteMessageBatchCommand,
   DeleteQueueCommand,
   GetQueueAttributesCommand,
   Message,
@@ -110,6 +111,63 @@ export async function createTestQueues(
     async destroy() {
       await sqs.send(new DeleteQueueCommand({ QueueUrl: queueUrl })).catch(() => undefined);
       await sqs.send(new DeleteQueueCommand({ QueueUrl: dlqUrl })).catch(() => undefined);
+      sqs.destroy();
+    },
+  };
+}
+
+export interface TestEventsQueue {
+  sqs: SQSClient;
+  url: string;
+  /** Recebe e apaga até esvaziar a fila (FIFO só libera o próximo do grupo após o delete). */
+  drain(): Promise<Message[]>;
+  destroy(): Promise<void>;
+}
+
+/** Fila FIFO de eventos descartável, como a `wager-events.fifo` (dedup explícito, sem dedup por conteúdo). */
+export async function createTestEventsQueue(label: string): Promise<TestEventsQueue> {
+  const sqs = createTestSqsClient();
+  const { QueueUrl } = await sqs.send(
+    new CreateQueueCommand({
+      QueueName: `test-${label}-${randomUUID().slice(0, 8)}-events.fifo`,
+      Attributes: { FifoQueue: 'true', ContentBasedDeduplication: 'false' },
+    }),
+  );
+  const url = QueueUrl!;
+  return {
+    sqs,
+    url,
+    async drain() {
+      const all: Message[] = [];
+      for (let empties = 0; empties < 2; ) {
+        const r = await sqs.send(
+          new ReceiveMessageCommand({
+            QueueUrl: url,
+            MaxNumberOfMessages: 10,
+            WaitTimeSeconds: 0,
+            VisibilityTimeout: 30,
+            MessageSystemAttributeNames: ['MessageGroupId', 'MessageDeduplicationId'],
+            MessageAttributeNames: ['All'],
+          }),
+        );
+        const batch = r.Messages ?? [];
+        if (batch.length === 0) {
+          empties++;
+          continue;
+        }
+        empties = 0;
+        all.push(...batch);
+        await sqs.send(
+          new DeleteMessageBatchCommand({
+            QueueUrl: url,
+            Entries: batch.map((m, i) => ({ Id: String(i), ReceiptHandle: m.ReceiptHandle! })),
+          }),
+        );
+      }
+      return all;
+    },
+    async destroy() {
+      await sqs.send(new DeleteQueueCommand({ QueueUrl: url })).catch(() => undefined);
       sqs.destroy();
     },
   };

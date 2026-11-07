@@ -39,3 +39,21 @@ export function createSqsClient(env: NodeJS.ProcessEnv = process.env): SQSClient
     endpoint: env.AWS_ENDPOINT || undefined,
   });
 }
+
+export function outboxPublisherEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.OUTBOX_PUBLISHER_ENABLED ?? 'true').toLowerCase() !== 'false';
+}
+
+export function eventsQueueUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const url = env.SQS_EVENTS_QUEUE_URL;
+  if (!url) throw new Error('Missing environment variable SQS_EVENTS_QUEUE_URL');
+  return url;
+}
+
+export function outboxRelayConfigFromEnv(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    batchSize: Number(env.OUTBOX_BATCH_SIZE ?? 50),
+    pollIntervalMs: Number(env.OUTBOX_POLL_INTERVAL_MS ?? 500),
+    errorPauseMs: Number(env.OUTBOX_ERROR_PAUSE_MS ?? 1000),
+  };
+}

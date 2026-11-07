@@ -20,7 +20,8 @@ import { toInboxMessage, toWagerTransaction, toWallet } from './mappers';
 /** Erros de rede/conexão do driver pg que não viram exceções do MikroORM. */
 const TRANSIENT_NODE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN']);
 
-function translate(error: unknown): unknown {
+/** Exceções do driver → erros da aplicação (UNIQUE violada, falha transitória). */
+export function translateDriverError(error: unknown): unknown {
   if (error instanceof UniqueConstraintViolationException) {
     return new UniqueViolationError((error as unknown as { constraint?: string }).constraint);
   }
@@ -169,7 +170,7 @@ export class MikroOrmUnitOfWork implements UnitOfWork {
       // fork(): identity map isolado por transação — nada vaza entre requisições
       return await this.orm.em.fork().transactional((em) => work(repositories(em)));
     } catch (e) {
-      throw translate(e);
+      throw translateDriverError(e);
     }
   }
 }
