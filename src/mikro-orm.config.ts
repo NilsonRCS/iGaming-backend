@@ -1,4 +1,5 @@
-import { defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
+import { DefaultLogger, defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
+import { rootLogger } from './infrastructure/observability/logger';
 import { Migrator } from '@mikro-orm/migrations';
 import { WalletEntity } from './infrastructure/persistence/entities/wallet.entity';
 import { WagerTransactionEntity } from './infrastructure/persistence/entities/wager-transaction.entity';
@@ -48,6 +49,14 @@ export default defineConfig({
     snapshot: false,
   },
 
-  // Debug apenas em desenvolvimento
-  debug: process.env.NODE_ENV === 'development',
+  // SQL no log só com opt-in explícito: o debug do MikroORM interpola os parâmetros
+  // (valores e saldos) e a seção 12 proíbe payloads financeiros nos logs. Uso local, nunca em produção.
+  debug: process.env.MIKRO_ORM_DEBUG === 'true',
+  // Avisos/erros do ORM no mesmo stream JSON do resto da aplicação
+  colors: false,
+  loggerFactory: (options) =>
+    new DefaultLogger({
+      ...options,
+      writer: (message) => rootLogger().child({ context: 'MikroORM' }).info(message),
+    }),
 });

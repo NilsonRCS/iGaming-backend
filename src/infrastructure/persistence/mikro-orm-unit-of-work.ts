@@ -1,14 +1,6 @@
-import {
-  ConnectionException,
-  DeadlockException,
-  EntityManager,
-  LockMode,
-  LockWaitTimeoutException,
-  MikroORM,
-  UniqueConstraintViolationException,
-} from '@mikro-orm/core';
+import { EntityManager, MikroORM } from '@mikro-orm/core';
+import type { EntityManager as SqlEntityManager } from '@mikro-orm/postgresql';
 import { TransactionalRepositories, UnitOfWork } from '../../application/ports/unit-of-work.port';
-import { TransientInfrastructureError, UniqueViolationError } from '../../application/errors';
 import { WagerKind, WagerStatus } from '../../domain/wager-transaction/wager-transaction.enums';
 import { WalletEntity } from './entities/wallet.entity';
 import { WagerTransactionEntity } from './entities/wager-transaction.entity';
@@ -16,35 +8,53 @@ import { WalletLedgerEntryEntity } from './entities/wallet-ledger-entry.entity';
 import { OutboxMessageEntity } from './entities/outbox-message.entity';
 import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { toInboxMessage, toWagerTransaction, toWallet } from './mappers';
+import { translateDriverError } from './driver-errors';
 
-/** Erros de rede/conexão do driver pg que não viram exceções do MikroORM. */
-const TRANSIENT_NODE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN']);
+export { translateDriverError } from './driver-errors';
 
-/** Exceções do driver → erros da aplicação (UNIQUE violada, falha transitória). */
-export function translateDriverError(error: unknown): unknown {
-  if (error instanceof UniqueConstraintViolationException) {
-    return new UniqueViolationError((error as unknown as { constraint?: string }).constraint);
+/** Observação do lock pessimista da wallet (métricas de conflito e espera). */
+export interface WalletLockObserver {
+  conflict(): void;
+  waited(seconds: number): void;
+}
+
+const LOCK_NOT_AVAILABLE = '55P03';
+
+/**
+ * SELECT ... FOR UPDATE na wallet, medindo contenção com precisão:
+ * tenta NOWAIT dentro de um savepoint; se outra transação segura a linha (55P03),
+ * volta ao savepoint (a transação segue válida), conta o conflito e espera o lock normalmente.
+ * A garantia é a mesma do FOR UPDATE simples: ao retornar, esta transação detém o lock.
+ */
+async function lockWallet(em: SqlEntityManager, id: string, observer?: WalletLockObserver): Promise<void> {
+  await em.execute('savepoint wallet_lock');
+  try {
+    await em.execute('select 1 from wallets where id = ? for update nowait', [id]);
+    await em.execute('release savepoint wallet_lock');
+    observer?.waited(0);
+    return;
+  } catch (error) {
+    if ((error as { code?: string })?.code !== LOCK_NOT_AVAILABLE) throw error;
+    await em.execute('rollback to savepoint wallet_lock');
+    await em.execute('release savepoint wallet_lock');
   }
-  if (
-    error instanceof ConnectionException ||
-    error instanceof DeadlockException ||
-    error instanceof LockWaitTimeoutException ||
-    TRANSIENT_NODE_CODES.has((error as { code?: string })?.code ?? '')
-  ) {
-    return new TransientInfrastructureError((error as Error).message, error);
-  }
-  return error;
+  observer?.conflict();
+  const started = performance.now();
+  await em.execute('select 1 from wallets where id = ? for update', [id]);
+  observer?.waited((performance.now() - started) / 1000);
 }
 
 /**
  * Escritas explícitas (em.insert / em.nativeUpdate): nada depende de flush implícito
  * do identity map, e cada comando SQL é emitido no ponto em que aparece no caso de uso.
  */
-function repositories(em: EntityManager): TransactionalRepositories {
+function repositories(em: EntityManager, lockObserver?: WalletLockObserver): TransactionalRepositories {
   return {
     wallets: {
       async findByIdForUpdate(id) {
-        const e = await em.findOne(WalletEntity, { id }, { lockMode: LockMode.PESSIMISTIC_WRITE });
+        await lockWallet(em as unknown as SqlEntityManager, id, lockObserver);
+        // Lido depois do lock: em READ COMMITTED cada comando vê o último commit
+        const e = await em.findOne(WalletEntity, { id });
         return e ? toWallet(e) : null;
       },
       async findByPlayerAndCurrency(playerId, currency) {
@@ -163,12 +173,15 @@ function repositories(em: EntityManager): TransactionalRepositories {
 }
 
 export class MikroOrmUnitOfWork implements UnitOfWork {
-  constructor(private readonly orm: MikroORM) {}
+  constructor(
+    private readonly orm: MikroORM,
+    private readonly lockObserver?: WalletLockObserver,
+  ) {}
 
   async run<T>(work: (repos: TransactionalRepositories) => Promise<T>): Promise<T> {
     try {
       // fork(): identity map isolado por transação — nada vaza entre requisições
-      return await this.orm.em.fork().transactional((em) => work(repositories(em)));
+      return await this.orm.em.fork().transactional((em) => work(repositories(em, this.lockObserver)));
     } catch (e) {
       throw translateDriverError(e);
     }

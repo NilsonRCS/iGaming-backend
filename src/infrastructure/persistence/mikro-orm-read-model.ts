@@ -4,6 +4,16 @@ import { Money } from '../../shared/money/money';
 import { WalletEntity } from './entities/wallet.entity';
 import { WagerTransactionEntity } from './entities/wager-transaction.entity';
 import { toWagerTransaction, toWallet } from './mappers';
+import { translateDriverError } from './driver-errors';
+
+/** Banco indisponível nas consultas também vira falha transitória (HTTP 503), não 500. */
+async function translated<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    throw translateDriverError(e);
+  }
+}
 
 interface LedgerSqlRow {
   id: string;
@@ -24,17 +34,17 @@ export class MikroOrmReadModel implements WageringReadModel {
   constructor(private readonly orm: MikroORM) {}
 
   async findWallet(id: string) {
-    const e = await this.orm.em.fork().findOne(WalletEntity, { id });
+    const e = await translated(() => this.orm.em.fork().findOne(WalletEntity, { id }));
     return e ? toWallet(e) : null;
   }
 
   async findTransaction(id: string) {
-    const e = await this.orm.em.fork().findOne(WagerTransactionEntity, { id });
+    const e = await translated(() => this.orm.em.fork().findOne(WagerTransactionEntity, { id }));
     return e ? toWagerTransaction(e) : null;
   }
 
   async findTransactionByExternalId(providerId: string, externalTransactionId: string) {
-    const e = await this.orm.em.fork().findOne(WagerTransactionEntity, { providerId, externalTransactionId });
+    const e = await translated(() => this.orm.em.fork().findOne(WagerTransactionEntity, { providerId, externalTransactionId }));
     return e ? toWagerTransaction(e) : null;
   }
 
@@ -51,7 +61,7 @@ export class MikroOrmReadModel implements WageringReadModel {
     }
     params.push(limit);
 
-    const rows: LedgerSqlRow[] = await this.orm.em.fork().getConnection().execute(
+    const rows: LedgerSqlRow[] = await translated(() => this.orm.em.fork().getConnection().execute(
       `select id, wallet_id, transaction_id, direction, money_amount, money_currency,
               balance_before_amount, balance_after_amount, created_at, created_at::text as created_at_text
          from wallet_ledger_entries
@@ -59,7 +69,7 @@ export class MikroOrmReadModel implements WageringReadModel {
         order by created_at desc, id desc
         limit ?`,
       params as never[],
-    );
+    ));
 
     return rows.map((r) => ({
       entry: {

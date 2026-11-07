@@ -9,6 +9,8 @@ export interface PublishOutboxBatchResult {
   deferred: number;
   /** Primeiro erro de publicação do lote (para log). */
   firstError?: unknown;
+  /** Para cada evento publicado: segundos entre occurredAt e a publicação. */
+  publishDelaysSeconds: number[];
 }
 
 /**
@@ -23,7 +25,7 @@ export class PublishOutboxBatchUseCase {
   ) {}
 
   async execute(batchSize: number): Promise<PublishOutboxBatchResult> {
-    const result: PublishOutboxBatchResult = { claimed: 0, published: 0, failed: 0, deferred: 0 };
+    const result: PublishOutboxBatchResult = { claimed: 0, published: 0, failed: 0, deferred: 0, publishDelaysSeconds: [] };
 
     result.claimed = await this.store.processDue(batchSize, async (messages, now) => {
       const byAggregate = new Map<string, OutboxMessage[]>();
@@ -41,6 +43,7 @@ export class PublishOutboxBatchUseCase {
               await this.publisher.publish(message);
               message.markPublished(now);
               result.published++;
+              result.publishDelaysSeconds.push(Math.max(0, (now.getTime() - message.occurredAt.getTime()) / 1000));
             } catch (error) {
               message.scheduleRetry(now);
               result.failed++;

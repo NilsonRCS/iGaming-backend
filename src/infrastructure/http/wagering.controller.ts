@@ -1,9 +1,8 @@
-import { Body, Controller, Get, Headers, HttpStatus, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpStatus, Inject, Param, Post, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import {
-  ProcessWagerTransactionResult,
-  ProcessWagerTransactionUseCase,
-} from '../../application/use-cases/process-wager-transaction.use-case';
+import { ProcessWagerTransactionResult } from '../../application/use-cases/process-wager-transaction.use-case';
+import type { WagerProcessor } from '../observability/instrumented-processor';
+import { HTTP_WAGER_PROCESSOR } from './tokens';
 import { WageringQueries } from '../../application/queries/wagering-queries';
 import { WagerTransactionView } from '../../application/views';
 import { InvalidPayloadError } from '../../application/errors';
@@ -29,7 +28,7 @@ export function statusForResult(result: ProcessWagerTransactionResult): number {
 @Controller()
 export class WageringController {
   constructor(
-    private readonly processTransaction: ProcessWagerTransactionUseCase,
+    @Inject(HTTP_WAGER_PROCESSOR) private readonly processTransaction: WagerProcessor,
     private readonly queries: WageringQueries,
   ) {}
 

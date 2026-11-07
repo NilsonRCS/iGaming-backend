@@ -57,12 +57,21 @@ interface ValidInput {
   inbox?: { consumerName: string; messageId: string };
 }
 
+/** Pontos de observação (métricas) sem acoplar o caso de uso a uma biblioteca. */
+export interface ProcessWagerTransactionObserver {
+  /** Outra instância gravou a mesma chave primeiro; o caso de uso vai tentar de novo. */
+  uniqueViolationRetry(): void;
+}
+
 /**
  * Caso de uso único para BET, WIN, LOSS, REFUND e ROLLBACK.
  * Usado igualmente pela API HTTP e pelo consumidor SQS.
  */
 export class ProcessWagerTransactionUseCase {
-  constructor(private readonly uow: UnitOfWork) {}
+  constructor(
+    private readonly uow: UnitOfWork,
+    private readonly observer?: ProcessWagerTransactionObserver,
+  ) {}
 
   async execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult> {
     const input = this.validate(command);
@@ -71,7 +80,10 @@ export class ProcessWagerTransactionUseCase {
       try {
         return await this.uow.run((repos) => this.handle(repos, input));
       } catch (e) {
-        if (e instanceof UniqueViolationError && attempt < MAX_ATTEMPTS) continue;
+        if (e instanceof UniqueViolationError && attempt < MAX_ATTEMPTS) {
+          this.observer?.uniqueViolationRetry();
+          continue;
+        }
         throw e;
       }
     }

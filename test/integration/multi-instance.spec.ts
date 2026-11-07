@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
-import { randomUUID } from 'crypto';
 import { createTestDatabase, TestDatabase } from './support/test-database';
 import { walletsOutOfBalance } from './support/fixtures';
 import { createTestEventsQueue, createTestQueues, sleep, TestEventsQueue, TestQueues, waitFor } from './support/test-queues';
 import { AppInstance, countLogs, InstanceTopology, startInstance, sumLogField } from './support/app-instances';
+import { openWallet, submit, tx, TxBody } from './support/api-client';
 
 /**
  * Seção 8 e 13.3 com PROCESSOS REAIS: cada instância é um `bun src/main.ts` separado,
@@ -11,8 +11,6 @@ import { AppInstance, countLogs, InstanceTopology, startInstance, sumLogField } 
  * PostgreSQL e LocalStack reais; banco e filas descartáveis por bloco.
  */
 
-const PROVIDER = 'provider-a';
-type Wallet = { id: string; playerId: string };
 
 interface Env {
   db: TestDatabase;
@@ -28,9 +26,19 @@ async function createEnv(label: string, opts: { instances?: number; overrides?: 
   const events = await createTestEventsQueue(label);
   const topology = { db, queueUrl: queues.queueUrl, dlqUrl: queues.dlqUrl, eventsQueueUrl: events.url };
   const n = opts.instances ?? 3;
-  const instances = await Promise.all(
+  const started = await Promise.allSettled(
     Array.from({ length: n }, (_, i) => startInstance(`${label}-${i + 1}`, topology, opts.overrides?.[i] ?? {})),
   );
+  const instances = started.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+  const failure = started.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failure) {
+    // Boot falhou: desfaz o que foi criado, senão banco e filas ficam para trás
+    await Promise.all(instances.map((i) => i.stop('SIGKILL')));
+    await queues.destroy();
+    await events.destroy();
+    await db.destroy();
+    throw failure.reason;
+  }
   return { db, queues, events, topology, instances };
 }
 
@@ -46,35 +54,8 @@ async function destroyEnv(env: Env | undefined, extra: AppInstance[] = []): Prom
   }
 }
 
-async function openWallet(app: AppInstance, amount = '100.00'): Promise<Wallet> {
-  const r = await app.http('POST', '/wallets', { playerId: randomUUID(), initialBalance: { amount, currency: 'BRL' } });
-  expect(r.status).toBe(201);
-  return { id: r.body.id, playerId: r.body.playerId };
-}
-
-function tx(w: Wallet, kind: string, amount: string, extra: { ext?: string; ref?: string } = {}) {
-  const externalTransactionId = extra.ext ?? `ext-${kind}-${randomUUID()}`;
-  return {
-    idempotencyKey: `${PROVIDER}:${externalTransactionId}`,
-    providerId: PROVIDER,
-    externalTransactionId,
-    walletId: w.id,
-    playerId: w.playerId,
-    roundId: 'round-1',
-    gameId: 'game-1',
-    kind,
-    money: { amount, currency: 'BRL' },
-    referenceExternalTransactionId: extra.ref ?? null,
-  };
-}
-
-function submit(app: AppInstance, body: ReturnType<typeof tx>) {
-  const { idempotencyKey, ...payload } = body;
-  return app.http('POST', '/wagering/transactions', payload, { 'idempotency-key': idempotencyKey });
-}
-
 /** Cliente resiliente: instância caiu → reenvia a mesma requisição (mesma chave) para outra. */
-async function submitWithFailover(apps: AppInstance[], start: number, body: ReturnType<typeof tx>) {
+async function submitWithFailover(apps: AppInstance[], start: number, body: TxBody) {
   for (let attempt = 0; attempt < 20; attempt++) {
     const app = apps[(start + attempt) % apps.length];
     if (!app.isAlive()) continue;

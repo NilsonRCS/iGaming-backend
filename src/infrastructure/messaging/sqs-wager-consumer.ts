@@ -6,7 +6,6 @@ import {
   SendMessageCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
-import { Logger } from '@nestjs/common';
 import {
   ProcessWagerTransactionCommand,
   ProcessWagerTransactionResult,
@@ -14,15 +13,21 @@ import {
 import { classifyError, ErrorDisposition, retryDelaySeconds } from './message-disposition';
 import { SqsConsumerConfig } from './sqs.config';
 import { parseWagerMessage } from './wager-message';
+import { componentLogger, StructuredLogger } from '../observability/logger';
+import { runWithLogContext, sanitizeCorrelationId } from '../observability/correlation';
 
 export interface WagerTransactionProcessor {
   execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult>;
 }
 
-export interface ConsumerLogger {
-  log(message: string, context?: Record<string, unknown>): void;
-  warn(message: string, context?: Record<string, unknown>): void;
-  error(message: string, context?: Record<string, unknown>): void;
+export type ConsumerLogger = StructuredLogger;
+
+/** Pontos de observação (métricas) do consumidor. */
+export interface ConsumerObserver {
+  /** Erro transitório: a mensagem volta com backoff. */
+  retried(errorCode: string): void;
+  /** Erro permanente: mensagem enviada à DLQ. */
+  deadLettered(errorCode: string): void;
 }
 
 /**
@@ -53,7 +58,8 @@ export class SqsWagerConsumer {
     private readonly sqs: SQSClient,
     private readonly processor: WagerTransactionProcessor,
     private readonly config: SqsConsumerConfig,
-    private readonly logger: ConsumerLogger = nestLogger(),
+    private readonly logger: ConsumerLogger = componentLogger('SqsWagerConsumer'),
+    private readonly observer?: ConsumerObserver,
   ) {}
 
   start(): void {
@@ -124,13 +130,21 @@ export class SqsWagerConsumer {
         MaxNumberOfMessages: this.config.maxMessages,
         WaitTimeSeconds: this.config.waitTimeSeconds,
         MessageSystemAttributeNames: ['ApproximateReceiveCount', 'MessageGroupId'],
+        MessageAttributeNames: ['correlationId'],
       }),
       { abortSignal: this.receiveAbort.signal },
     );
     return response.Messages ?? [];
   }
 
-  private async handle(message: Message): Promise<Outcome> {
+  /** Cada mensagem roda no seu contexto de log: correlationId do produtor (ou o MessageId) + messageId. */
+  private handle(message: Message): Promise<Outcome> {
+    const messageId = message.MessageId ?? '';
+    const correlationId = sanitizeCorrelationId(message.MessageAttributes?.correlationId?.StringValue) ?? messageId;
+    return runWithLogContext({ correlationId, messageId }, () => this.handleInContext(message));
+  }
+
+  private async handleInContext(message: Message): Promise<Outcome> {
     const messageId = message.MessageId ?? '';
     const receiveCount = Number(message.Attributes?.ApproximateReceiveCount ?? 1);
     const ctx = { messageId, receiveCount, consumerName: this.config.consumerName };
@@ -171,11 +185,13 @@ export class SqsWagerConsumer {
     try {
       if (disposition.action === 'dlq') {
         await this.sendToDlq(message, disposition);
+        this.observer?.deadLettered(disposition.code);
         this.logger.warn('Permanent error; message moved to DLQ', { ...ctx, errorCode: disposition.code });
         return { kind: 'done' };
       }
       const delay = retryDelaySeconds(ctx.receiveCount, this.config.backoffBaseSeconds, this.config.backoffMaxSeconds);
       await this.changeVisibility(message, delay);
+      this.observer?.retried(disposition.code);
       this.logger.warn('Transient error; message will be retried', {
         ...ctx,
         errorCode: disposition.code,
@@ -238,14 +254,4 @@ function describe(error: unknown): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function nestLogger(): ConsumerLogger {
-  const logger = new Logger(SqsWagerConsumer.name);
-  const fmt = (message: string, context?: Record<string, unknown>) => (context ? `${message} ${JSON.stringify(context)}` : message);
-  return {
-    log: (m, c) => logger.log(fmt(m, c)),
-    warn: (m, c) => logger.warn(fmt(m, c)),
-    error: (m, c) => logger.error(fmt(m, c)),
-  };
 }

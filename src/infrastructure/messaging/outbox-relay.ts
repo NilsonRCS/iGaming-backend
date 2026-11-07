@@ -1,6 +1,14 @@
-import { Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PublishOutboxBatchResult } from '../../application/use-cases/publish-outbox-batch.use-case';
 import { ConsumerLogger } from './sqs-wager-consumer';
+import { componentLogger } from '../observability/logger';
+import { runWithLogContext } from '../observability/correlation';
+
+/** Pontos de observação (métricas) do publisher. */
+export interface RelayObserver {
+  published(delaysSeconds: number[]): void;
+  failed(count: number): void;
+}
 
 export interface OutboxRelayConfig {
   batchSize: number;
@@ -27,7 +35,8 @@ export class OutboxRelay {
   constructor(
     private readonly publishBatch: OutboxBatchPublisher,
     private readonly config: OutboxRelayConfig,
-    private readonly logger: ConsumerLogger = nestLogger(),
+    private readonly logger: ConsumerLogger = componentLogger('OutboxRelay'),
+    private readonly observer?: RelayObserver,
   ) {}
 
   start(): void {
@@ -46,9 +55,14 @@ export class OutboxRelay {
     this.logger.log('Outbox relay stopped');
   }
 
-  /** Um ciclo. Exposto para testes determinísticos. */
+  /** Um ciclo, com seu próprio correlationId nos logs. Exposto para testes determinísticos. */
   runOnce(): Promise<PublishOutboxBatchResult> {
-    return this.publishBatch.execute(this.config.batchSize);
+    return runWithLogContext({ correlationId: `outbox-${randomUUID()}` }, async () => {
+      const r = await this.publishBatch.execute(this.config.batchSize);
+      if (r.publishDelaysSeconds.length > 0) this.observer?.published(r.publishDelaysSeconds);
+      if (r.failed > 0) this.observer?.failed(r.failed);
+      return r;
+    });
   }
 
   private async run(): Promise<void> {
@@ -92,14 +106,4 @@ export class OutboxRelay {
 function describe(error: unknown): string | undefined {
   if (error === undefined) return undefined;
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-}
-
-function nestLogger(): ConsumerLogger {
-  const logger = new Logger(OutboxRelay.name);
-  const fmt = (message: string, context?: Record<string, unknown>) => (context ? `${message} ${JSON.stringify(context)}` : message);
-  return {
-    log: (m, c) => logger.log(fmt(m, c)),
-    warn: (m, c) => logger.warn(fmt(m, c)),
-    error: (m, c) => logger.error(fmt(m, c)),
-  };
 }

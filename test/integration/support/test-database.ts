@@ -18,6 +18,11 @@ export interface TestDatabase {
   openWallet: OpenWalletUseCase;
   processTransaction: ProcessWagerTransactionUseCase;
   sql<T = Record<string, unknown>>(query: string, params?: unknown[]): Promise<T[]>;
+  /**
+   * Simula PostgreSQL indisponível só para este banco: recusa novas conexões e derruba as abertas
+   * (inclusive as do próprio teste, que reconectam quando o acesso volta).
+   */
+  setAcceptingConnections(accept: boolean): Promise<void>;
   destroy(): Promise<void>;
 }
 
@@ -45,6 +50,13 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
     openWallet: new OpenWalletUseCase(uow),
     processTransaction: new ProcessWagerTransactionUseCase(uow),
     sql: (query, params = []) => orm.em.fork().getConnection().execute(query, params as never[]),
+    async setAcceptingConnections(accept) {
+      const conn = admin.em.getConnection();
+      await conn.execute(`alter database "${dbName}" with allow_connections ${accept ? 'true' : 'false'}`);
+      if (!accept) {
+        await conn.execute(`select pg_terminate_backend(pid) from pg_stat_activity where datname = ? and pid <> pg_backend_pid()`, [dbName]);
+      }
+    },
     async destroy() {
       await orm.close(true);
       await admin.em.getConnection().execute(`drop database if exists "${dbName}" with (force)`);

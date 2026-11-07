@@ -80,7 +80,8 @@ export async function startInstance(
     ...overrides,
   };
 
-  const child: ChildProcess = spawn('bun', ['src/main.ts'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // --no-env-file: o .env do repositório é do compose (hosts internos, flags de dev) e não pode vazar no teste
+  const child: ChildProcess = spawn('bun', ['--no-env-file', 'src/main.ts'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout!.on('data', (d) => (output += d));
   child.stderr!.on('data', (d) => (output += d));

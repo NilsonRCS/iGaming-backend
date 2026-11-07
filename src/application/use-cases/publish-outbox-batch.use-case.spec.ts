@@ -45,7 +45,7 @@ describe('PublishOutboxBatchUseCase', () => {
     const pub = publisher();
     const r = await new PublishOutboxBatchUseCase(store(msgs), pub).execute(10);
 
-    expect(r).toEqual({ claimed: 2, published: 2, failed: 0, deferred: 0 });
+    expect(r).toEqual({ claimed: 2, published: 2, failed: 0, deferred: 0, publishDelaysSeconds: [0, 0] });
     expect(msgs.every((m) => m.publishedAt?.getTime() === NOW.getTime())).toBe(true);
   });
 
@@ -92,7 +92,13 @@ describe('PublishOutboxBatchUseCase', () => {
 
   it('lote vazio não chama o publisher', async () => {
     const pub = publisher();
-    expect(await new PublishOutboxBatchUseCase(store([]), pub).execute(10)).toEqual({ claimed: 0, published: 0, failed: 0, deferred: 0 });
+    expect(await new PublishOutboxBatchUseCase(store([]), pub).execute(10)).toEqual({
+      claimed: 0,
+      published: 0,
+      failed: 0,
+      deferred: 0,
+      publishDelaysSeconds: [],
+    });
     expect(pub.sent).toEqual([]);
   });
 });
