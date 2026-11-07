@@ -52,3 +52,10 @@ export class TransientInfrastructureError extends ApplicationError {
     super(message);
   }
 }
+
+export class TransactionNotFoundError extends ApplicationError {
+  readonly code = 'TRANSACTION_NOT_FOUND';
+  constructor(readonly reference: string) {
+    super(`Wager transaction ${reference} not found`);
+  }
+}

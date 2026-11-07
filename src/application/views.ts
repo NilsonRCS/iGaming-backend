@@ -33,6 +33,22 @@ export interface WagerTransactionView {
   createdAt: string;
 }
 
+export interface LedgerEntryView {
+  id: string;
+  walletId: string;
+  transactionId: string;
+  direction: string;
+  money: MoneyView;
+  balanceBefore: MoneyView;
+  balanceAfter: MoneyView;
+  createdAt: string;
+}
+
+export interface LedgerPageView {
+  items: LedgerEntryView[];
+  nextCursor: string | null;
+}
+
 export function toWalletView(wallet: Wallet): WalletView {
   return {
     id: wallet.id,

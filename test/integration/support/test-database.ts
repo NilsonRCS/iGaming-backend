@@ -1,4 +1,4 @@
-import { MikroORM } from '@mikro-orm/postgresql';
+import { MikroORM, Options } from '@mikro-orm/postgresql';
 import config from '../../../src/mikro-orm.config';
 import { MikroOrmUnitOfWork } from '../../../src/infrastructure/persistence/mikro-orm-unit-of-work';
 import { OpenWalletUseCase } from '../../../src/application/use-cases/open-wallet.use-case';
@@ -13,6 +13,8 @@ const port = Number(process.env.TEST_POSTGRES_PORT ?? 5433);
 
 export interface TestDatabase {
   orm: MikroORM;
+  /** Opções do ORM apontando para o banco descartável (para montar a app Nest). */
+  options: Options;
   openWallet: OpenWalletUseCase;
   processTransaction: ProcessWagerTransactionUseCase;
   sql<T = Record<string, unknown>>(query: string, params?: unknown[]): Promise<T[]>;
@@ -31,13 +33,15 @@ export async function createTestDatabase(label: string): Promise<TestDatabase> {
   await admin.em.getConnection().execute(`drop database if exists "${dbName}" with (force)`);
   await admin.em.getConnection().execute(`create database "${dbName}"`);
 
-  const orm = await MikroORM.init({ ...base, dbName, pool: { min: 0, max: 25 } });
+  const options = { ...base, dbName, pool: { min: 0, max: 25 } } as Options;
+  const orm = await MikroORM.init(options);
   await orm.getMigrator().up();
 
   const uow = new MikroOrmUnitOfWork(orm);
 
   return {
     orm,
+    options,
     openWallet: new OpenWalletUseCase(uow),
     processTransaction: new ProcessWagerTransactionUseCase(uow),
     sql: (query, params = []) => orm.em.fork().getConnection().execute(query, params as never[]),
