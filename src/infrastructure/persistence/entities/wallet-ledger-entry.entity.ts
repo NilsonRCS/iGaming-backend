@@ -22,7 +22,7 @@ export class WalletLedgerEntryEntity {
   @ManyToOne(() => WagerTransactionEntity, { fieldName: 'transaction_id', columnType: 'uuid' })
   transaction!: WagerTransactionEntity;
 
-  @Enum({ items: () => LedgerDirection, columnType: 'varchar' })
+  @Enum({ items: () => LedgerDirection, nativeEnumName: 'ledger_direction' })
   direction!: LedgerDirection;
 
   @Property({ columnType: 'decimal(19,4)' })

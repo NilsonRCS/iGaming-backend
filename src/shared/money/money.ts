@@ -22,7 +22,12 @@ export class Money {
     Money.validateCurrency(currency);
     Money.validateAmountString(amount);
 
-    const decimal = new Decimal(amount);
+    let decimal: Decimal;
+    try {
+      decimal = new Decimal(amount);
+    } catch {
+      throw new InvalidMoneyError(`value is not numeric: "${amount}"`);
+    }
 
     if (decimal.isNaN() || !decimal.isFinite()) {
       throw new InvalidMoneyError('value must be a finite number');

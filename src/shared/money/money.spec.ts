@@ -49,7 +49,7 @@ describe('Money', () => {
     });
 
     it('rejeita string não numérica', () => {
-      expect(() => Money.from('abc', 'BRL')).toThrow();
+      expect(() => Money.from('abc', 'BRL')).toThrow(InvalidMoneyError);
     });
 
     it('rejeita moeda com menos de 3 chars', () => {

@@ -40,7 +40,7 @@ export class WagerTransactionEntity {
   @Property({ columnType: 'varchar' })
   gameId!: string;
 
-  @Enum({ items: () => WagerKind, columnType: 'varchar' })
+  @Enum({ items: () => WagerKind, nativeEnumName: 'wager_kind' })
   kind!: WagerKind;
 
   @Property({ columnType: 'decimal(19,4)' })
@@ -59,7 +59,7 @@ export class WagerTransactionEntity {
   })
   referenceTransaction?: WagerTransactionEntity;
 
-  @Enum({ items: () => WagerStatus, columnType: 'varchar' })
+  @Enum({ items: () => WagerStatus, nativeEnumName: 'wager_status' })
   status!: WagerStatus;
 
   @Property({ columnType: 'varchar', nullable: true })
