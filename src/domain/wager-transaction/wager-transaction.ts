@@ -2,6 +2,7 @@ import { Money } from '../../shared/money/money';
 import { DomainError } from '../../shared/errors/domain.error';
 import { WagerKind, WagerStatus } from './wager-transaction.enums';
 import { LedgerDirection } from '../wallet/ledger-direction.enum';
+import { FailureCode } from './failure-code.enum';
 import { randomUUID } from 'crypto';
 
 export interface WagerTransactionProps {
@@ -23,6 +24,21 @@ export interface WagerTransactionProps {
   processedAt?: Date;
   createdAt: Date;
 }
+
+/** Identidade técnica da transação OPENING (não vem de provedor). */
+export const SYSTEM_PROVIDER_ID = 'SYSTEM';
+
+/** Tipos que cada operação pode referenciar (seção 7.2). */
+const ALLOWED_REFERENCE_KINDS: Partial<Record<WagerKind, ReadonlySet<WagerKind>>> = {
+  [WagerKind.REFUND]: new Set([WagerKind.BET]),
+  [WagerKind.ROLLBACK]: new Set([WagerKind.BET, WagerKind.WIN, WagerKind.REFUND]),
+  [WagerKind.WIN]: new Set([WagerKind.BET]),
+};
+
+export type ReferenceEvaluation =
+  | { outcome: 'VALID' }
+  | { outcome: 'PENDING' }
+  | { outcome: 'INVALID'; failureCode: FailureCode };
 
 const TERMINAL_STATUSES = new Set([
   WagerStatus.PROCESSED,
@@ -48,8 +64,33 @@ export class WagerTransaction {
     });
   }
 
+  /** Transação técnica que registra o saldo inicial de uma wallet. */
+  static opening(params: {
+    walletId: string;
+    playerId: string;
+    money: Money;
+    payloadHash: string;
+  }): WagerTransaction {
+    const key = `OPENING:${params.walletId}`;
+    return new WagerTransaction({
+      id: randomUUID(),
+      providerId: SYSTEM_PROVIDER_ID,
+      externalTransactionId: key,
+      idempotencyKey: key,
+      payloadHash: params.payloadHash,
+      walletId: params.walletId,
+      playerId: params.playerId,
+      roundId: WagerKind.OPENING,
+      gameId: WagerKind.OPENING,
+      kind: WagerKind.OPENING,
+      money: params.money,
+      status: WagerStatus.PENDING,
+      createdAt: new Date(),
+    });
+  }
+
   static rehydrate(props: WagerTransactionProps): WagerTransaction {
-    return new WagerTransaction(props);
+    return new WagerTransaction({ ...props });
   }
 
   // ── Transições de estado ───────────────────────────────────────────────────
@@ -92,6 +133,62 @@ export class WagerTransaction {
   /** REFUND e ROLLBACK precisam de uma transação de referência */
   requiresReference(): boolean {
     return this.props.kind === WagerKind.REFUND || this.props.kind === WagerKind.ROLLBACK;
+  }
+
+  hasReference(): boolean {
+    return !!this.props.referenceExternalTransactionId;
+  }
+
+  isReversal(): boolean {
+    return this.requiresReference();
+  }
+
+  /** REFUND e ROLLBACK sempre usam referência; WIN usa quando informada. */
+  usesReference(): boolean {
+    return this.requiresReference() || (this.props.kind === WagerKind.WIN && this.hasReference());
+  }
+
+  /**
+   * Avalia a transação referenciada (seção 7.2). Não cobre "já revertida",
+   * que depende de consultar outras transações (responsabilidade do caso de uso).
+   */
+  evaluateReference(reference: WagerTransaction): ReferenceEvaluation {
+    const allowed = ALLOWED_REFERENCE_KINDS[this.props.kind];
+    if (!allowed || !allowed.has(reference.kind)) {
+      return { outcome: 'INVALID', failureCode: FailureCode.INVALID_REFERENCE_KIND };
+    }
+
+    if (
+      reference.providerId !== this.props.providerId ||
+      reference.playerId !== this.props.playerId ||
+      reference.walletId !== this.props.walletId ||
+      reference.roundId !== this.props.roundId
+    ) {
+      return { outcome: 'INVALID', failureCode: FailureCode.REFERENCE_MISMATCH };
+    }
+
+    if (reference.money.currency !== this.props.money.currency) {
+      return { outcome: 'INVALID', failureCode: FailureCode.CURRENCY_MISMATCH };
+    }
+
+    if (reference.status === WagerStatus.REJECTED || reference.status === WagerStatus.FAILED) {
+      return { outcome: 'INVALID', failureCode: FailureCode.REFERENCE_NOT_PROCESSED };
+    }
+
+    if (reference.status !== WagerStatus.PROCESSED) {
+      return { outcome: 'PENDING' };
+    }
+
+    if (this.isReversal() && !reference.money.equals(this.props.money)) {
+      return { outcome: 'INVALID', failureCode: FailureCode.REFERENCE_AMOUNT_MISMATCH };
+    }
+
+    return { outcome: 'VALID' };
+  }
+
+  linkReference(reference: WagerTransaction): void {
+    this.assertNotTerminal();
+    this.props.referenceTransactionId = reference.id;
   }
 
   /** Verifica se o payload recebido é idêntico ao já registrado (replay seguro) */

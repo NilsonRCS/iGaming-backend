@@ -11,6 +11,8 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "bun test",
+    "test:unit": "bun test src",
+    "test:integration": "bun test test/integration",
     "test:watch": "bun test --watch",
     "test:load": "bun run test/load/run.ts",
     "migration:create": "bun --bun node_modules/.bin/mikro-orm migration:create",

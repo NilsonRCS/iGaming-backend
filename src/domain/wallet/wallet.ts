@@ -79,6 +79,12 @@ export class Wallet {
     });
   }
 
+  /** true se o débito não deixaria o saldo negativo */
+  canDebit(money: Money): boolean {
+    this.assertSameCurrency(money);
+    return !this.props.balance.subtract(money).isNegative();
+  }
+
   assertSameCurrency(money: Money): void {
     if (this.props.balance.currency !== money.currency) {
       throw new DomainError(

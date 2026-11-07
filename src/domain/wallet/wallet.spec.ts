@@ -114,4 +114,18 @@ describe('Wallet', () => {
       expect(w.version).toBe(7);
     });
   });
+
+  describe('canDebit()', () => {
+    it('true até o saldo exato; false acima dele; não altera estado', () => {
+      const w = open();
+      expect(w.canDebit(brl('100.00'))).toBe(true);
+      expect(w.canDebit(brl('100.01'))).toBe(false);
+      expect(w.balance.amount).toBe('100.00');
+      expect(w.version).toBe(1);
+    });
+
+    it('moeda diferente é erro', () => {
+      expect(() => open().canDebit(Money.from('1.00', 'USD'))).toThrow(DomainError);
+    });
+  });
 });
