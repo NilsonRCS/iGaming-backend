@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { OpenWalletUseCase } from '../../application/use-cases/open-wallet.use-case';
 import { WageringQueries } from '../../application/queries/wagering-queries';
 import { LedgerPageView, WalletView } from '../../application/views';
-import { asObject, nestedObject } from './request-body';
+import { asObject, nestedObject } from '../wager-command';
 
 @Controller('wallets')
 export class WalletsController {

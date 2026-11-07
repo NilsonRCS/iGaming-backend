@@ -8,7 +8,7 @@ import { WageringQueries } from '../../application/queries/wagering-queries';
 import { WagerTransactionView } from '../../application/views';
 import { InvalidPayloadError } from '../../application/errors';
 import { WagerStatus } from '../../domain/wager-transaction/wager-transaction.enums';
-import { asObject, nestedObject } from './request-body';
+import { wagerCommandFromJson } from '../wager-command';
 
 /** Seção 9.6: o status HTTP reflete o resultado de negócio da transação. */
 export function statusForResult(result: ProcessWagerTransactionResult): number {
@@ -43,22 +43,7 @@ export class WageringController {
       throw new InvalidPayloadError(['Idempotency-Key header is required']);
     }
 
-    const body = asObject(raw);
-    const money = nestedObject(body, 'money');
-
-    const result = await this.processTransaction.execute({
-      idempotencyKey,
-      providerId: body.providerId as string,
-      externalTransactionId: body.externalTransactionId as string,
-      walletId: body.walletId as string,
-      playerId: body.playerId as string,
-      roundId: body.roundId as string,
-      gameId: body.gameId as string,
-      kind: body.kind as string,
-      amount: money.amount as string,
-      currency: money.currency as string,
-      referenceExternalTransactionId: body.referenceExternalTransactionId as string | null | undefined,
-    });
+    const result = await this.processTransaction.execute(wagerCommandFromJson(raw, idempotencyKey));
 
     reply.status(statusForResult(result));
     return result;
