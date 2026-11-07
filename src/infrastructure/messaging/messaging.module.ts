@@ -16,6 +16,7 @@ import {
 import { SqsWagerConsumer } from './sqs-wager-consumer';
 import { SqsEventPublisher } from './sqs-event-publisher';
 import { OutboxRelay } from './outbox-relay';
+import { withKillAfterCommit, withKillAfterPublish } from './fault-injection';
 
 export const SQS_CLIENT = Symbol('SQS_CLIENT');
 const WAGER_CONSUMER = Symbol('WAGER_CONSUMER');
@@ -48,7 +49,7 @@ class WorkersLifecycle implements OnApplicationBootstrap, BeforeApplicationShutd
     {
       provide: WAGER_CONSUMER,
       useFactory: (sqs: SQSClient, useCase: ProcessWagerTransactionUseCase) =>
-        sqsConsumerEnabled() ? new SqsWagerConsumer(sqs, useCase, sqsConsumerConfigFromEnv()) : null,
+        sqsConsumerEnabled() ? new SqsWagerConsumer(sqs, withKillAfterCommit(useCase), sqsConsumerConfigFromEnv()) : null,
       inject: [SQS_CLIENT, ProcessWagerTransactionUseCase],
     },
     {
@@ -57,7 +58,7 @@ class WorkersLifecycle implements OnApplicationBootstrap, BeforeApplicationShutd
         if (!outboxPublisherEnabled()) return null;
         const useCase = new PublishOutboxBatchUseCase(
           new MikroOrmOutboxStore(orm),
-          new SqsEventPublisher(sqs, eventsQueueUrlFromEnv()),
+          withKillAfterPublish(new SqsEventPublisher(sqs, eventsQueueUrlFromEnv())),
         );
         return new OutboxRelay(useCase, outboxRelayConfigFromEnv());
       },
