@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: igaming
       POSTGRES_PASSWORD: igaming
     ports:
-      - "5432:5432"
+      - "5433:5432"   # host:5433 → container:5432 (evita conflito com postgres local)
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,9 +45,10 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432   # porta interna da rede do compose (5433 é só no host)
       AWS_ENDPOINT: http://localstack:4566
     ports:
-      - "2112:2112"
+      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,6 +65,7 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432   # porta interna da rede do compose (5433 é só no host)
       AWS_ENDPOINT: http://localstack:4566
       APP_PORT: 3001
     ports:

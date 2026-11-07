@@ -1,10 +1,10 @@
 import { defineConfig, PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
-import { WalletEntity } from './src/infrastructure/persistence/entities/wallet.entity';
-import { WagerTransactionEntity } from './src/infrastructure/persistence/entities/wager-transaction.entity';
-import { WalletLedgerEntryEntity } from './src/infrastructure/persistence/entities/wallet-ledger-entry.entity';
-import { InboxMessageEntity } from './src/infrastructure/persistence/entities/inbox-message.entity';
-import { OutboxMessageEntity } from './src/infrastructure/persistence/entities/outbox-message.entity';
+import { WalletEntity } from './infrastructure/persistence/entities/wallet.entity';
+import { WagerTransactionEntity } from './infrastructure/persistence/entities/wager-transaction.entity';
+import { WalletLedgerEntryEntity } from './infrastructure/persistence/entities/wallet-ledger-entry.entity';
+import { InboxMessageEntity } from './infrastructure/persistence/entities/inbox-message.entity';
+import { OutboxMessageEntity } from './infrastructure/persistence/entities/outbox-message.entity';
 
 export default defineConfig({
   driver: PostgreSqlDriver,
@@ -32,6 +32,10 @@ export default defineConfig({
 
   // Desabilita o autoJoin implícito para manter controle explícito
   autoJoinOneToOneOwner: false,
+
+  // O MikroORM assume modo TS sempre que roda sob Bun. Decide pela origem
+  // deste arquivo: fonte .ts usa src/, build .js (imagem de produção) usa dist/.
+  preferTs: __filename.endsWith(".ts"),
 
   // Migrations
   extensions: [Migrator],

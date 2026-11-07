@@ -20,6 +20,9 @@ RUN bun install --frozen-lockfile --production
 # Copia o build gerado
 COPY --from=builder /app/dist ./dist
 
+# A imagem só tem o build JS: a CLI do MikroORM deve usar dist/, não src/
+ENV MIKRO_ORM_CLI_USE_TS_NODE=false
+
 EXPOSE 3000
 
 CMD ["node", "dist/main"]
