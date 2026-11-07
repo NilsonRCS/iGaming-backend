@@ -4,6 +4,7 @@ import { WagerKind, WagerStatus } from './wager-transaction.enums';
 import { LedgerDirection } from '../wallet/ledger-direction.enum';
 import { FailureCode } from './failure-code.enum';
 import { randomUUID } from 'crypto';
+import { PendingReferencePolicy } from './pending-reference-policy';
 
 export interface WagerTransactionProps {
   id: string;
@@ -23,6 +24,10 @@ export interface WagerTransactionProps {
   failureCode?: string;
   processedAt?: Date;
   createdAt: Date;
+  /** Tentativas de resolução feitas pelo worker de PENDING_REFERENCE (seção 7.4). */
+  referenceAttempts?: number;
+  /** Próxima tentativa de resolução; ausente = no próximo ciclo do worker. */
+  nextReferenceAttemptAt?: Date;
 }
 
 /** Identidade técnica da transação OPENING (não vem de provedor). */
@@ -117,6 +122,18 @@ export class WagerTransaction {
     this.assertNotTerminal();
     this.props.status = WagerStatus.FAILED;
     this.props.failureCode = failureCode;
+  }
+
+  /**
+   * A referência ainda não pode ser aplicada: conta a tentativa e agenda a próxima (backoff da política).
+   * Só faz sentido para quem continua PENDING_REFERENCE.
+   */
+  scheduleReferenceRetry(now: Date, policy: PendingReferencePolicy): void {
+    if (this.props.status !== WagerStatus.PENDING_REFERENCE) {
+      throw new DomainError(`Only PENDING_REFERENCE transactions can be rescheduled (status: ${this.props.status})`);
+    }
+    this.props.referenceAttempts = this.referenceAttempts + 1;
+    this.props.nextReferenceAttemptAt = policy.nextAttemptAt(this.props.createdAt, this.props.referenceAttempts, now);
   }
 
   // ── Consultas de domínio ───────────────────────────────────────────────────
@@ -250,4 +267,6 @@ export class WagerTransaction {
   get failureCode(): string | undefined { return this.props.failureCode; }
   get processedAt(): Date | undefined { return this.props.processedAt; }
   get createdAt(): Date { return this.props.createdAt; }
+  get referenceAttempts(): number { return this.props.referenceAttempts ?? 0; }
+  get nextReferenceAttemptAt(): Date | undefined { return this.props.nextReferenceAttemptAt; }
 }

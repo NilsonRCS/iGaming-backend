@@ -386,6 +386,7 @@ describe('SqsWagerConsumer — SIGTERM', () => {
       AWS_SECRET_ACCESS_KEY: 'test',
       SQS_CONSUMER_ENABLED: 'true',
       OUTBOX_PUBLISHER_ENABLED: 'false',
+      PENDING_REFERENCE_WORKER_ENABLED: 'false',
     };
     const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
     Object.assign(process.env, env);

@@ -73,6 +73,14 @@ export class Metrics {
     registers: [this.registry],
   });
 
+  // PENDING_REFERENCE (seção 7.4)
+  readonly pendingReferenceResolutions = new Counter({
+    name: 'pending_reference_resolutions_total',
+    help: 'Transações PENDING_REFERENCE resolvidas pelo worker (processed, rejected, expired)',
+    labelNames: ['outcome'] as const,
+    registers: [this.registry],
+  });
+
   // Latência
   readonly processingDuration = new Histogram({
     name: 'wagering_processing_duration_seconds',
@@ -91,6 +99,7 @@ export class Metrics {
 
   private outboxSource?: () => Promise<OutboxSnapshot>;
   private dlqDepthSource?: () => Promise<number>;
+  private pendingReferenceSource?: () => Promise<number>;
   private onSourceError?: (metric: string, error: unknown) => void;
 
   constructor() {
@@ -115,6 +124,14 @@ export class Metrics {
       },
     });
     new Gauge({
+      name: 'pending_reference_transactions',
+      help: 'Transações aguardando a referência (PENDING_REFERENCE)',
+      registers: [this.registry],
+      async collect() {
+        this.set(await self.read('pending_reference_transactions', async () => self.pendingReferenceSource?.()));
+      },
+    });
+    new Gauge({
       name: 'sqs_dlq_depth',
       help: 'Mensagens na DLQ (inclui as movidas pelo redrive da fila)',
       registers: [this.registry],
@@ -126,6 +143,10 @@ export class Metrics {
 
   setOutboxSource(source: () => Promise<OutboxSnapshot>): void {
     this.outboxSource = source;
+  }
+
+  setPendingReferenceSource(source: () => Promise<number>): void {
+    this.pendingReferenceSource = source;
   }
 
   setDlqDepthSource(source: () => Promise<number>): void {

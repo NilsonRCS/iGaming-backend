@@ -70,4 +70,11 @@ export class WagerTransactionEntity {
 
   @Property({ columnType: 'timestamptz', onCreate: () => new Date() })
   createdAt: Date = new Date();
+
+  /** Seção 7.4: tentativas de resolução de PENDING_REFERENCE. */
+  @Property({ columnType: 'integer', default: 0 })
+  referenceAttempts: number = 0;
+
+  @Property({ columnType: 'timestamptz', nullable: true })
+  nextReferenceAttemptAt?: Date;
 }

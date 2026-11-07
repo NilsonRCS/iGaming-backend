@@ -155,7 +155,7 @@ describe('3 instâncias — HTTP', () => {
     }
   }, 60_000);
 
-  it('REFUND/ROLLBACK em paralelo com o próprio BET em instâncias diferentes: nunca crédito duplicado', async () => {
+  it('REFUND/ROLLBACK em paralelo com o próprio BET em instâncias diferentes: resolvido no fim, nunca crédito duplicado', async () => {
     const wallets = await Promise.all(Array.from({ length: 12 }, (_, i) => openWallet(env.instances[i % 3])));
 
     await Promise.all(
@@ -166,16 +166,19 @@ describe('3 instâncias — HTTP', () => {
       }),
     );
 
+    // Quem chegou antes do BET ficou PENDING_REFERENCE; o worker das instâncias resolve (seção 7.4)
+    await waitFor(async () => {
+      const [{ n }] = await env.db.sql<{ n: number }>(`select count(*)::int as n from wager_transactions where status = 'PENDING_REFERENCE'`);
+      return n === 0;
+    }, 15_000);
+
     for (const w of wallets) {
       const rows = await txRows(env.db, w.id);
-      const bet = rows.find((r) => r.kind === 'BET')!;
-      const rev = rows.find((r) => r.kind !== 'BET')!;
-      expect(bet.status).toBe('PROCESSED');
-      expect(['PROCESSED', 'PENDING_REFERENCE']).toContain(rev.status);
-      const credits = (await ledgerDirections(env.db, w.id)).filter((l) => l.direction === 'CREDIT');
-      // Reversão aplicada (BET chegou antes) → saldo restaurado; pendente (chegou antes do BET) → só o débito
-      expect(credits).toHaveLength(rev.status === 'PROCESSED' ? 1 : 0);
-      expect(await balance(env.db, w.id)).toBe(rev.status === 'PROCESSED' ? '100.00' : '70.00');
+      expect(rows.map((r) => `${r.kind}:${r.status}`).sort()).toEqual(
+        [rows.find((r) => r.kind !== 'BET')!.kind + ':PROCESSED', 'BET:PROCESSED'].sort(),
+      );
+      expect((await ledgerDirections(env.db, w.id)).map((l) => l.direction)).toEqual(['DEBIT', 'CREDIT']);
+      expect(await balance(env.db, w.id)).toBe('100.00');
     }
   }, 60_000);
 });
@@ -222,22 +225,22 @@ describe('3 instâncias — fila SQS', () => {
     expect(workers.length).toBeGreaterThanOrEqual(2);
   }, 60_000);
 
-  it('REFUND entregue antes do BET referenciado: fica PENDING_REFERENCE, sem crédito; o BET é aplicado', async () => {
+  it('REFUND entregue antes do BET referenciado: fica PENDING_REFERENCE sem crédito e é aplicado quando o BET chega', async () => {
     const w = await openWallet(env.instances[0]);
     const bet = tx(w, 'BET', '30.00');
     const refund = tx(w, 'REFUND', '30.00', { ref: bet.externalTransactionId });
     await env.queues.send(refund, w.id); // provedor entregou fora de ordem
     await env.queues.send(bet, w.id);
 
-    await waitFor(async () => (await txRows(env.db, w.id)).length === 2 && (await queueDrained(env.queues)), 15_000);
+    // REFUND processado primeiro (ordem do grupo FIFO) → pendente; depois o worker resolve
+    await waitFor(async () => (await txRows(env.db, w.id)).every((r) => r.status === 'PROCESSED') && (await txRows(env.db, w.id)).length === 2, 15_000);
 
-    const rows = await txRows(env.db, w.id);
-    expect(rows.find((r) => r.kind === 'REFUND')!.status).toBe('PENDING_REFERENCE');
-    expect(rows.find((r) => r.kind === 'BET')!.status).toBe('PROCESSED');
-    expect(await ledgerDirections(env.db, w.id)).toEqual([{ direction: 'DEBIT', amount: '30.00' }]);
-    expect(await balance(env.db, w.id)).toBe('70.00');
     const types = await env.db.sql<{ event_type: string }>(`select event_type from outbox_messages where aggregate_id = ?`, [w.id]);
     expect(types.map((t) => t.event_type)).toContain('WagerTransactionPendingReference');
+    expect((await ledgerDirections(env.db, w.id)).map((l) => `${l.direction} ${l.amount}`)).toEqual(['DEBIT 30.00', 'CREDIT 30.00']);
+    expect(await balance(env.db, w.id)).toBe('100.00');
+    const resolvedBy = env.instances.filter((i) => i.logs().includes('"msg":"Pending reference resolved"'));
+    expect(resolvedBy.length).toBeGreaterThanOrEqual(1);
   }, 30_000);
 });
 

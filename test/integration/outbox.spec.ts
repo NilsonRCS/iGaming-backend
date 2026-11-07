@@ -302,6 +302,7 @@ describe('Outbox publisher — ciclo de vida', () => {
       AWS_SECRET_ACCESS_KEY: 'test',
       SQS_CONSUMER_ENABLED: 'false',
       OUTBOX_PUBLISHER_ENABLED: 'true',
+      PENDING_REFERENCE_WORKER_ENABLED: 'false',
       OUTBOX_POLL_INTERVAL_MS: '50',
     };
     const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));

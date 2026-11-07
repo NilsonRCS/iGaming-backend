@@ -39,6 +39,8 @@ export function toWagerTransaction(e: WagerTransactionEntity): WagerTransaction 
     failureCode: e.failureCode ?? undefined,
     processedAt: e.processedAt ?? undefined,
     createdAt: e.createdAt,
+    referenceAttempts: e.referenceAttempts ?? 0,
+    nextReferenceAttemptAt: e.nextReferenceAttemptAt ?? undefined,
   });
 }
 

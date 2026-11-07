@@ -57,3 +57,22 @@ export function outboxRelayConfigFromEnv(env: NodeJS.ProcessEnv = process.env) {
     errorPauseMs: Number(env.OUTBOX_ERROR_PAUSE_MS ?? 1000),
   };
 }
+
+export function pendingReferenceWorkerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.PENDING_REFERENCE_WORKER_ENABLED ?? 'true').toLowerCase() !== 'false';
+}
+
+export function pendingReferenceConfigFromEnv(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    worker: {
+      batchSize: Number(env.PENDING_REFERENCE_BATCH_SIZE ?? 50),
+      pollIntervalMs: Number(env.PENDING_REFERENCE_POLL_INTERVAL_MS ?? 1000),
+      errorPauseMs: Number(env.PENDING_REFERENCE_ERROR_PAUSE_MS ?? 1000),
+    },
+    policy: {
+      baseMs: Number(env.PENDING_REFERENCE_BACKOFF_BASE_MS ?? 2_000),
+      maxMs: Number(env.PENDING_REFERENCE_BACKOFF_MAX_MS ?? 300_000),
+      ttlMs: Number(env.PENDING_REFERENCE_TTL_MS ?? 86_400_000),
+    },
+  };
+}

@@ -119,7 +119,48 @@ function repositories(em: EntityManager, lockObserver?: WalletLockObserver): Tra
           failureCode: t.failureCode ?? null,
           processedAt: t.processedAt ?? null,
           createdAt: t.createdAt,
+          referenceAttempts: t.referenceAttempts,
+          nextReferenceAttemptAt: t.nextReferenceAttemptAt ?? null,
         });
+      },
+      async findDuePendingReferences(limit) {
+        const rows = await (em as unknown as SqlEntityManager).execute<{ id: string; wallet_id: string }[]>(
+          `select id, wallet_id from wager_transactions
+            where status = 'PENDING_REFERENCE'
+              and (next_reference_attempt_at is null or next_reference_attempt_at <= now())
+            order by coalesce(next_reference_attempt_at, created_at), id
+            limit ?`,
+          [limit],
+        );
+        return rows.map((r) => ({ id: r.id, walletId: r.wallet_id }));
+      },
+      async lockDuePendingReference(id) {
+        // NO KEY UPDATE: não bloqueia a verificação de FK de quem insere uma transação referenciando esta
+        const rows = await (em as unknown as SqlEntityManager).execute<{ id: string; db_now: string | Date }[]>(
+          `select id, now() as db_now from wager_transactions
+            where id = ? and status = 'PENDING_REFERENCE'
+              and (next_reference_attempt_at is null or next_reference_attempt_at <= now())
+              for no key update skip locked`,
+          [id],
+        );
+        if (rows.length === 0) return null;
+        const e = await em.findOne(WagerTransactionEntity, { id }, { refresh: true });
+        return e ? { transaction: toWagerTransaction(e), now: new Date(rows[0].db_now) } : null;
+      },
+      async updatePendingReference(t) {
+        const affected = await em.nativeUpdate(
+          WagerTransactionEntity,
+          { id: t.id, status: WagerStatus.PENDING_REFERENCE },
+          {
+            status: t.status,
+            failureCode: t.failureCode ?? null,
+            referenceTransaction: t.referenceTransactionId ?? null,
+            processedAt: t.processedAt ?? null,
+            referenceAttempts: t.referenceAttempts,
+            nextReferenceAttemptAt: t.nextReferenceAttemptAt ?? null,
+          },
+        );
+        if (affected !== 1) throw new Error(`Pending reference ${t.id} changed concurrently`);
       },
     },
 

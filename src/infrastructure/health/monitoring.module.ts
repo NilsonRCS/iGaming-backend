@@ -31,6 +31,13 @@ class OperationalGauges implements OnModuleInit {
       return { pending: Number(row.pending), oldestAgeSeconds: Number(row.lag ?? 0) };
     });
 
+    this.metrics.setPendingReferenceSource(async () => {
+      const [row] = await (this.orm.em.fork() as unknown as EntityManager).execute<{ n: number }[]>(
+        `select count(*)::int as n from wager_transactions where status = 'PENDING_REFERENCE'`,
+      );
+      return Number(row.n);
+    });
+
     const dlqUrl = process.env.SQS_DLQ_URL;
     if (dlqUrl) {
       this.metrics.setDlqDepthSource(async () => {

@@ -20,6 +20,16 @@ export interface WagerTransactionRepository {
   /** Existe transação PROCESSED do tipo `kind` revertendo `referenceTransactionId`? */
   existsProcessedReversal(referenceTransactionId: string, kind: WagerKind): Promise<boolean>;
   insert(transaction: WagerTransaction): Promise<void>;
+  /** Seção 7.4: PENDING_REFERENCE devidas (sem lock), mais antigas primeiro. */
+  findDuePendingReferences(limit: number): Promise<{ id: string; walletId: string }[]>;
+  /**
+   * Trava (FOR NO KEY UPDATE SKIP LOCKED) a transação se ainda estiver PENDING_REFERENCE e devida.
+   * null se outro worker a pegou, se já foi resolvida ou se ainda não chegou a hora.
+   * `now` é o relógio do banco.
+   */
+  lockDuePendingReference(id: string): Promise<{ transaction: WagerTransaction; now: Date } | null>;
+  /** Persiste a resolução/reagendamento de uma transação que estava PENDING_REFERENCE. */
+  updatePendingReference(transaction: WagerTransaction): Promise<void>;
 }
 
 export interface LedgerRepository {
