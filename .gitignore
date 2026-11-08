@@ -2,6 +2,5 @@ node_modules/
 dist/
 .env
 *.log
-bun.lock
 TesteJDEV.md
 teste.md
