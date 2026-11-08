@@ -1,5 +1,10 @@
 import { MikroORM } from '@mikro-orm/core';
-import { LedgerPosition, LedgerRow, WageringReadModel } from '../../application/ports/wagering-read-model.port';
+import {
+  LedgerPosition,
+  LedgerRow,
+  ReconciliationSnapshot,
+  WageringReadModel,
+} from '../../application/ports/wagering-read-model.port';
 import { Money } from '../../shared/money/money';
 import { WalletEntity } from './entities/wallet.entity';
 import { WagerTransactionEntity } from './entities/wager-transaction.entity';
@@ -84,5 +89,45 @@ export class MikroOrmReadModel implements WageringReadModel {
       },
       position: { createdAt: r.created_at_text, id: r.id },
     }));
+  }
+
+  /**
+   * Instrução única: o PostgreSQL avalia saldo e soma do ledger no mesmo snapshot, e saldo +
+   * lançamento são confirmados no mesmo commit — reconciliação concorrente não acusa divergência falsa.
+   */
+  async reconciliationSnapshot(walletId: string): Promise<ReconciliationSnapshot | null> {
+    const rows: {
+      id: string;
+      currency: string;
+      version: number;
+      stored: string;
+      ledger: string;
+      entries: number;
+      checked_at: string | Date;
+    }[] = await translated(() =>
+      this.orm.em.fork().getConnection().execute(
+        `select w.id, w.currency, w.version,
+                w.balance_amount::text as stored,
+                coalesce(sum(case l.direction when 'CREDIT' then l.money_amount else -l.money_amount end), 0)::text as ledger,
+                count(l.id)::int as entries,
+                now() as checked_at
+           from wallets w
+           left join wallet_ledger_entries l on l.wallet_id = w.id
+          where w.id = ?
+          group by w.id`,
+        [walletId],
+      ),
+    );
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      walletId: r.id,
+      currency: r.currency.trim(),
+      storedBalance: r.stored,
+      ledgerBalance: r.ledger,
+      ledgerEntries: Number(r.entries),
+      walletVersion: Number(r.version),
+      checkedAt: new Date(r.checked_at),
+    };
   }
 }

@@ -206,6 +206,28 @@ describe('Métricas (/metrics)', () => {
   }, 60_000);
 });
 
+describe('Reconciliação (seção 9.4)', () => {
+  it('divergência: log warn com identificadores e sem valores, métrica e resposta; nada é corrigido', async () => {
+    const w = await openWallet(app, '64.20');
+    await db.sql(`update wallets set balance_amount = balance_amount + 0.37 where id = ?`, [w.id]);
+    try {
+      const r = await app.http('POST', `/wallets/${w.id}/reconciliation`, undefined, { 'x-correlation-id': 'corr-recon-1' });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ consistent: false, difference: { amount: '0.37' } });
+      await sleep(200);
+
+      const line = logLines().find((l) => l.msg === 'Wallet balance divergence detected' && l.walletId === w.id);
+      expect(line).toMatchObject({ level: 'warn', correlationId: 'corr-recon-1', consistent: false, ledgerEntries: 1 });
+      const raw = app.logs().split('\n').filter((l) => l.includes(w.id)).join('\n');
+      expect(raw).not.toContain('64.57');
+      expect(raw).not.toContain('0.37');
+      expect(sample(await metrics(), 'wallet_reconciliations_total', { result: 'divergent' })).toBeGreaterThanOrEqual(1);
+    } finally {
+      await db.sql(`update wallets set balance_amount = balance_amount - 0.37 where id = ?`, [w.id]);
+    }
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Health checks', () => {

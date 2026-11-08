@@ -73,6 +73,14 @@ export class Metrics {
     registers: [this.registry],
   });
 
+  // Reconciliação (seção 9.4)
+  readonly reconciliations = new Counter({
+    name: 'wallet_reconciliations_total',
+    help: 'Reconciliações de wallet: saldo armazenado × soma do ledger (consistent | divergent)',
+    labelNames: ['result'] as const,
+    registers: [this.registry],
+  });
+
   // PENDING_REFERENCE (seção 7.4)
   readonly pendingReferenceResolutions = new Counter({
     name: 'pending_reference_resolutions_total',

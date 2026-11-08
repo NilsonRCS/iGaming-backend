@@ -9,6 +9,8 @@ import { WAGERING_READ_MODEL, WageringReadModel } from '../application/ports/wag
 import { WageringQueries } from '../application/queries/wagering-queries';
 import { ObservabilityModule } from './observability/observability.module';
 import { Metrics } from './observability/metrics';
+import { componentLogger } from './observability/logger';
+import { ReconcileWalletUseCase } from '../application/use-cases/reconcile-wallet.use-case';
 
 /** Liga os casos de uso (sem dependência de framework) aos adaptadores de infraestrutura. */
 @Module({
@@ -42,11 +44,27 @@ import { Metrics } from './observability/metrics';
       inject: [MikroORM],
     },
     {
+      provide: ReconcileWalletUseCase,
+      useFactory: (read: WageringReadModel, metrics: Metrics) => {
+        const logger = componentLogger('Reconciliation');
+        return new ReconcileWalletUseCase(read, {
+          reconciled: (r) => {
+            metrics.reconciliations.inc({ result: r.consistent ? 'consistent' : 'divergent' });
+            // Sem valores no log (seção 12): eles estão na resposta
+            const fields = { walletId: r.walletId, walletVersion: r.walletVersion, ledgerEntries: r.ledgerEntries, consistent: r.consistent };
+            if (r.consistent) logger.log('Wallet reconciled', fields);
+            else logger.warn('Wallet balance divergence detected', fields);
+          },
+        });
+      },
+      inject: [WAGERING_READ_MODEL, Metrics],
+    },
+    {
       provide: WageringQueries,
       useFactory: (read: WageringReadModel) => new WageringQueries(read),
       inject: [WAGERING_READ_MODEL],
     },
   ],
-  exports: [UNIT_OF_WORK, OpenWalletUseCase, ProcessWagerTransactionUseCase, WageringQueries],
+  exports: [UNIT_OF_WORK, OpenWalletUseCase, ProcessWagerTransactionUseCase, WageringQueries, ReconcileWalletUseCase],
 })
 export class WageringModule {}
