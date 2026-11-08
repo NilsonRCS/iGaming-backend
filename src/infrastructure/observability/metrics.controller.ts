@@ -1,8 +1,10 @@
 import { Controller, Get, Header, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { Metrics } from './metrics';
+import { Public } from '../http/auth/public.decorator';
 
-/** Formato de exposição do Prometheus. Aberto, como os health checks. */
+/** Formato de exposição do Prometheus. Aberto como os health checks; proteção de rede (porta interna). */
+@Public()
 @Controller()
 export class MetricsController {
   constructor(private readonly metrics: Metrics) {}

@@ -1,5 +1,6 @@
 import { BeforeApplicationShutdown, Controller, Get, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
+import { Public } from '../http/auth/public.decorator';
 import { PostgresHealthIndicator, SqsHealthIndicator } from './health.indicators';
 
 /** SIGTERM recebido: a instância deixa de aceitar tráfego novo (readiness 503) enquanto drena. */
@@ -12,7 +13,8 @@ export class ShutdownState implements BeforeApplicationShutdown {
   }
 }
 
-/** Seção 9.5: sem autenticação. */
+/** Seções 3 e 9.5: sem autenticação, também quando houver autenticação real. */
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

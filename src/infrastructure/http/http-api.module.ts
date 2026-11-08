@@ -10,9 +10,10 @@ import { Metrics } from '../observability/metrics';
 import { componentLogger } from '../observability/logger';
 import { ObservabilityModule } from '../observability/observability.module';
 import { HTTP_WAGER_PROCESSOR } from './tokens';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
-  imports: [WageringModule, ObservabilityModule],
+  imports: [WageringModule, ObservabilityModule, AuthModule],
   controllers: [WalletsController, WageringController],
   providers: [
     { provide: APP_FILTER, useClass: ApplicationExceptionFilter },
